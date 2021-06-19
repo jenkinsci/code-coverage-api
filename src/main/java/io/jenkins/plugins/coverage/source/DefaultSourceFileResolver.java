@@ -39,10 +39,13 @@ import org.kohsuke.stapler.DataBoundConstructor;
 import javax.annotation.Nonnull;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class DefaultSourceFileResolver extends SourceFileResolver {
 
@@ -229,6 +232,32 @@ public class DefaultSourceFileResolver extends SourceFileResolver {
                 if (isValidSourceFile(sourceFile)) {
                     return new FilePath(sourceFile);
                 }
+            }
+
+            // last but not least, search for the sourceFilePath within the entire workspace
+            // for Cobertura, this step attempts to ignore CoverageFeatureConstants.FEATURE_SOURCE_FILE_PATH
+            // or 'source-file-path':'coverage/sources/source' as set in Cobertura output XML files
+            /* NOTES:
+                https://issues.jenkins.io/browse/JENKINS-5235
+                https://github.com/jenkinsci/cobertura-plugin/issues/103
+                https://github.com/jenkinsci/cobertura-plugin/issues/61
+
+            */
+            try (Stream<Path> walk = Files.walk(Paths.get(workspace.getAbsolutePath()))) {
+                List<Path> results = walk
+                .filter(Files::isRegularFile)
+                .filter(x -> x.endsWith(sourceFilePath))
+                .collect(Collectors.toList());
+
+                // what if two files have the same sourceFilePath, but are in different parent directories?
+                if (results.size() > 0) {
+                    sourceFile = new File(results.get(0).toString());
+                    if (isValidSourceFile(sourceFile)) {
+                        return new FilePath(sourceFile);
+                    }
+                }
+            } catch (IOException e) { // do nothing
+                //e.printStackTrace();
             }
 
             // fallback to use the pre-scanned workspace to see if there's a file that matches
